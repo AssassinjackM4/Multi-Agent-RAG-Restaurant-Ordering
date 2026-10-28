@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🍽️ AI Restaurant Order Agent
+# 🍽️ Multi Agent RAG Restaurant Ordering
 
 ### *From "I'm Hungry" to "Enjoy Your Meal" — Fully Autonomous!* 🤖🍳
 
