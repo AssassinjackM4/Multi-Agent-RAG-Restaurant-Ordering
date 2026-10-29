@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from main import MENU, State, get_llm, initial_state, run_turn
+from main import State, get_llm, initial_state, inventory_snapshot, run_turn
 
 app = FastAPI(title="Restaurant Order Agent API", version="1.0.0")
 allowed_origins = [
@@ -81,6 +81,8 @@ def state_payload(state: State) -> dict:
             }
             for message in state["messages"]
         ],
+        "agent_trace": state["agent_trace"],
+        "recommendations": state["recommendations"],
         "order": state["order"],
         "status": state["status"],
         "pending_partial_confirmation": state["pending_partial_confirmation"],
@@ -88,6 +90,7 @@ def state_payload(state: State) -> dict:
         "cook_retries": state["cook_retries"],
         "serve_retries": state["serve_retries"],
         "final_result": state["final_result"],
+        "reserved_quantity": state["reserved_quantity"],
     }
 
 
@@ -109,7 +112,7 @@ def health() -> dict[str, str]:
 
 @app.get("/api/menu")
 def menu() -> dict[str, dict[str, int]]:
-    return {"items": {name: quantity for name, quantity in MENU.items()}}
+    return {"items": inventory_snapshot()}
 
 
 @app.post("/api/chat/sessions")

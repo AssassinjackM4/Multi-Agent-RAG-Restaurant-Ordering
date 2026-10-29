@@ -12,10 +12,12 @@ uv add langgraph langchain-groq python-dotenv
 """
 
 import difflib
+import operator
 import os
 import random
 import re
 import sys
+from threading import RLock
 from typing import Annotated, Literal, Optional, TypedDict
 
 from dotenv import load_dotenv
@@ -25,6 +27,8 @@ from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
+
+from menu_rag import MenuRecommendation, recommend_menu_items
 
 load_dotenv()
 
@@ -59,7 +63,21 @@ MENU: dict[str, int] = {
     "pad thai": 7,
     "falafel": 5,
     "cheesecake": 3,
+    "lasagna": 5,
+    "margherita pizza": 7,
+    "chicken tikka masala": 6,
+    "chole bhature": 5,
+    "green curry": 6,
+    "mac and cheese": 6,
+    "tiramisu": 5,
+    "veg momos": 8,
+    "chinese veg dumplings": 8,
+    "veg spring rolls": 8,
+    "veg fried rice": 8,
+    "chilli paneer": 8,
 }
+INITIAL_MENU = MENU.copy()
+inventory_lock = RLock()
 
 ORDER_RETRIES = 3
 COOK_RETRIES = 2
@@ -121,11 +139,13 @@ Status = Literal[
     "serve_failed",
     "done",
     "failed",
+    "menu_recommendation",
 ]
 
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
+    agent_trace: Annotated[list[str], operator.add]
     order: OrderDetails
     status: Status
     pending_partial_confirmation: bool
@@ -133,11 +153,14 @@ class State(TypedDict):
     cook_retries: int  # cook RE-runs left (2); first cook is free, every re-cook costs one, whoever caused it
     serve_retries: int  # serve RE-runs left (2); first serve is free
     final_result: str
+    recommendations: list[MenuRecommendation]
+    reserved_quantity: int
 
 
 def initial_state() -> State:
     return {
         "messages": [],
+        "agent_trace": [],
         "order": {"dish_name": "", "required_quantity": 0, "available_quantity": 0},
         "status": "new",
         "pending_partial_confirmation": False,
@@ -145,7 +168,29 @@ def initial_state() -> State:
         "cook_retries": COOK_RETRIES,
         "serve_retries": SERVE_RETRIES,
         "final_result": "",
+        "recommendations": [],
+        "reserved_quantity": 0,
     }
+
+
+def inventory_snapshot() -> dict[str, int]:
+    """Return a consistent stock snapshot for API responses and retrieval."""
+    with inventory_lock:
+        return MENU.copy()
+
+
+def reset_inventory() -> None:
+    """Restore demo inventory to its initial quantities."""
+    with inventory_lock:
+        MENU.clear()
+        MENU.update(INITIAL_MENU)
+
+
+def release_inventory(dish_name: str, quantity: int) -> None:
+    """Return a failed order's reservation without exceeding initial stock."""
+    with inventory_lock:
+        if dish_name in MENU and quantity > 0:
+            MENU[dish_name] = min(INITIAL_MENU[dish_name], MENU[dish_name] + quantity)
 
 
 def get_llm() -> ChatGroq:
@@ -198,12 +243,22 @@ Was the user just offered a partial order? {partial_offer}
 """
 
 
+def latest_human_message(state: State) -> HumanMessage | None:
+    """Return the newest human message, or None when a state has no user input yet."""
+    for message in reversed(state["messages"]):
+        if isinstance(message, HumanMessage):
+            return message
+    return None
+
+
 def extract_order(state: State) -> OrderIntent:
     """Ask the LLM to pull dish + quantity (or intent) out of the latest user message."""
     partial_offer = "yes" if state["pending_partial_confirmation"] else "no"
-    system = EXTRACT_PROMPT.format(menu=MENU, partial_offer=partial_offer)
+    system = EXTRACT_PROMPT.format(menu=inventory_snapshot(), partial_offer=partial_offer)
     structured = get_llm().with_structured_output(OrderIntent)
-    last_user = next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
+    last_user = latest_human_message(state)
+    if last_user is None:
+        return OrderIntent(intent="unrelated")
     return structured.invoke([SystemMessage(system), last_user])
 
 
@@ -221,20 +276,25 @@ def check_menu_availability(message: str) -> tuple[str, OrderDetails] | None:
         "which dishes",
         "what foods",
         "what food",
+        "show me the menu",
+        "what is on the menu",
+        "what's on the menu",
+        "menu",
         "how many",
         "vegetarian",
     )
     if not any(cue in normalized for cue in availability_cues):
         return None
+    inventory = inventory_snapshot()
 
     # Keep explicit quantity orders on the normal LLM extraction path.
     if re.search(r"\b(?:order|want|like|give me|send|buy|place)\b", normalized) and re.search(r"\b\d+\b", normalized):
         return None
 
-    for dish in sorted(MENU, key=len, reverse=True):
+    for dish in sorted(inventory, key=len, reverse=True):
         dish_pattern = re.escape(dish).replace(r"\ ", r"\s+") + r"s?"
         if re.search(rf"\b{dish_pattern}\b", normalized):
-            quantity = MENU[dish]
+            quantity = inventory[dish]
             detail = {
                 "dish_name": dish,
                 "required_quantity": 0,
@@ -255,8 +315,13 @@ def check_menu_availability(message: str) -> tuple[str, OrderDetails] | None:
         "what is available",
         "what s available",
         "what s in stock",
+        "show me the menu",
+        "what is on the menu",
+        "what s on the menu",
+        "what's on the menu",
         "all dishes",
         "full menu",
+        "menu",
         "vegetarian",
     )
     if not any(phrase in normalized for phrase in broad_menu_question):
@@ -264,10 +329,55 @@ def check_menu_availability(message: str) -> tuple[str, OrderDetails] | None:
 
     inventory = [
         f"{dish}: {quantity}" + (" (sold out)" if quantity == 0 else "")
-        for dish, quantity in MENU.items()
+        for dish, quantity in inventory.items()
     ]
     answer = "Current menu stock: " + "; ".join(inventory) + ". Tell me a dish and quantity to place an order."
     return answer, {"dish_name": "", "required_quantity": 0, "available_quantity": 0}
+
+
+def is_menu_recommendation(message: str) -> bool:
+    """Identify discovery requests that need retrieval rather than a stock lookup."""
+    normalized = message.lower()
+    cues = (
+        "recommend",
+        "suggest",
+        "similar to",
+        "like but",
+        "cheaper",
+        "spicy",
+        "light meal",
+        "high protein",
+        "protein",
+        "healthy",
+        "plant based",
+        "plant-based",
+        "vegan",
+        "vegetarian",
+        "italian",
+        "indian",
+        "american",
+        "japanese",
+        "chinese",
+        "korean",
+        "mexican",
+        "thai",
+        "vietnamese",
+        "greek",
+        "mediterranean",
+        "middle eastern",
+        "french",
+        "british",
+    )
+    price_filter = re.search(
+        r"\b(?:under|below|less than|cheaper than)\s*(?:₹|\$|rs\.?\s*|inr\s*|rupees?\s*)?\d+(?:\.\d{1,2})?",
+        normalized,
+    )
+    return bool(price_filter) or any(cue in normalized for cue in cues)
+
+
+def uses_inr_currency(message: str) -> bool:
+    """INR cannot be compared to this catalog's USD prices without conversion data."""
+    return bool(re.search(r"₹|\b(?:inr|rupees?)\b|\brs\.?\s*\d", message.lower()))
 
 
 def say(instruction: str, state: State) -> str:
@@ -301,7 +411,18 @@ def llm_node(state: State) -> dict:
 
     # ---- waiting on the user: parse what they typed ----------------------
     if status in ("new", "awaiting_user"):
-        last_user = next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
+        last_user = latest_human_message(state)
+        if last_user is None:
+            message = "Tell me what you'd like to order (dish + quantity) or ask about the menu."
+            return {
+                "messages": [AIMessage(message)],
+                "order": {"dish_name": "", "required_quantity": 0, "available_quantity": 0},
+                "status": "awaiting_user",
+                "pending_partial_confirmation": False,
+            }
+        if is_menu_recommendation(last_user.content):
+            return {"status": "menu_recommendation", "recommendations": []}
+
         availability = check_menu_availability(last_user.content)
         if availability:
             message, inventory_order = availability
@@ -316,8 +437,12 @@ def llm_node(state: State) -> dict:
 
         if parsed.intent == "accept_partial" and state["pending_partial_confirmation"] and order["available_quantity"] > 0:
             order["required_quantity"] = order["available_quantity"]
-            msg = say(f"Confirm we are going ahead with {order['required_quantity']} x {order['dish_name']} and sending it to the kitchen.", {**state, "order": order})
-            return {"messages": [AIMessage(msg)], "order": order, "status": "cook", "pending_partial_confirmation": False}
+            return {
+                "messages": [AIMessage("Thanks. I’m checking the latest stock before confirming the available quantity.")],
+                "order": order,
+                "status": "placed",
+                "pending_partial_confirmation": False,
+            }
 
         if parsed.intent == "new_order" and parsed.dish_name:
             order = {
@@ -331,7 +456,7 @@ def llm_node(state: State) -> dict:
             if not parsed.dish_name:
                 inventory = [
                     f"{dish}: {quantity}" + (" (sold out)" if quantity == 0 else "")
-                    for dish, quantity in MENU.items()
+                    for dish, quantity in inventory_snapshot().items()
                 ]
                 message = "Current menu stock: " + "; ".join(inventory) + ". Tell me a dish and quantity to place an order."
                 order = {"dish_name": "", "required_quantity": 0, "available_quantity": 0}
@@ -350,7 +475,7 @@ def llm_node(state: State) -> dict:
                     "status": "awaiting_user",
                     "pending_partial_confirmation": False,
                 }
-            available = MENU[match]
+            available = inventory_snapshot()[match]
             order = {"dish_name": match, "required_quantity": 0, "available_quantity": available}
             message = (
                 f"We have {available} {match} available right now. Tell me how many you would like to order."
@@ -374,7 +499,10 @@ def llm_node(state: State) -> dict:
 
     # ---- order_confirm reported back ------------------------------------
     if status == "confirmed":
-        msg = say(f"Confirm the order of {order['required_quantity']} x {order['dish_name']} is available and is being sent to the kitchen.", state)
+        msg = (
+            f"Confirmed {order['required_quantity']} {order['dish_name']}. "
+            "The demo kitchen is preparing your order."
+        )
         return {"messages": [AIMessage(msg)], "status": "cook", "pending_partial_confirmation": False}
 
     if status in ("partial", "unavailable"):
@@ -394,53 +522,61 @@ def llm_node(state: State) -> dict:
 
     # ---- cook reported back ---------------------------------------------
     if status == "ready":
-        msg = say("Say the food is ready and is now being served.", state)
+        msg = "The simulated kitchen finished cooking. The demo service step is underway."
         return {"messages": [AIMessage(msg)], "status": "serve"}
 
     if status == "cook_failed":
         if state["cook_retries"] > 0:
             print(f"[llm] cook failed -> retry cook (cook retries left: {state['cook_retries'] - 1})")
-            msg = say("Say there was a problem in the kitchen and the dish is being cooked again.", state)
+            msg = "The simulated kitchen hit a retryable issue and is preparing your order again."
             return {"messages": [AIMessage(msg)], "status": "cook", "cook_retries": state["cook_retries"] - 1}
-        msg = say("Apologize sincerely: the kitchen failed to prepare the dish even after retrying, so the order is cancelled.", state)
+        msg = "The simulated kitchen could not prepare this order after its retries. The reservation has been released."
         return {"messages": [AIMessage(msg)], "status": "failed", "final_result": "NOT COMPLETED: cook failed"}
 
     # ---- serve reported back --------------------------------------------
     if status == "complete":
-        msg = say("Tell the customer their order is complete and enjoy the meal.", state)
+        msg = "The simulated kitchen and service steps are complete. Enjoy your meal!"
         return {"messages": [AIMessage(msg)], "status": "done", "final_result": "COMPLETED"}
 
     if status == "serve_failed":
         # a re-serve needs a re-cook first, so this spends one retry of each
         if state["serve_retries"] > 0 and state["cook_retries"] > 0:
             print(f"[llm] serve failed -> retry cook+serve (cook retries left: {state['cook_retries'] - 1}, serve retries left: {state['serve_retries'] - 1})")
-            msg = say("Say serving went wrong, the dish is being cooked once more and will be served again.", state)
+            msg = "The simulated service step hit an issue. The kitchen is preparing the order again for another attempt."
             return {"messages": [AIMessage(msg)], "status": "cook", "cook_retries": state["cook_retries"] - 1, "serve_retries": state["serve_retries"] - 1}
         reason = "serve failed" if state["serve_retries"] <= 0 else "serve failed and cook retries exhausted"
-        msg = say(f"Apologize sincerely: {reason}, so the order is cancelled.", state)
+        msg = f"The simulated service could not complete the order ({reason}). The reservation has been released."
         return {"messages": [AIMessage(msg)], "status": "failed", "final_result": f"NOT COMPLETED: {reason}"}
 
     raise ValueError(f"llm node got unexpected status {status!r}")
 
 
 def order_confirm(state: State) -> dict:
-    """Check the order against the MENU and write available_quantity + status."""
+    """Atomically check and reserve stock for a complete order."""
     order = dict(state["order"])
     match = find_menu_item(order["dish_name"])
     if match:
         order["dish_name"] = match
-    available = MENU[match] if match else 0
-    order["available_quantity"] = available
-
-    if available == 0:
-        status = "unavailable"
-    elif available < order["required_quantity"]:
-        status = "partial"
-    else:
-        status = "confirmed"
+    with inventory_lock:
+        available = MENU[match] if match else 0
+        order["available_quantity"] = available
+        reserved_quantity = 0
+        if available == 0:
+            status = "unavailable"
+        elif available < order["required_quantity"]:
+            status = "partial"
+        else:
+            status = "confirmed"
+            reserved_quantity = order["required_quantity"]
+            MENU[match] -= reserved_quantity
 
     print(f"[order_confirm] {order['dish_name']}: need {order['required_quantity']}, have {available} -> {status}")
-    return {"order": order, "status": status}
+    return {
+        "order": order,
+        "status": status,
+        "reserved_quantity": reserved_quantity,
+        "agent_trace": ["inventory_agent"],
+    }
 
 
 def _outcome(config: RunnableConfig, key: str, prob: float) -> bool:
@@ -455,18 +591,63 @@ def cook(state: State, config: RunnableConfig) -> dict:
     """60/40 coin flip. The llm decides (and pays for) any retry."""
     if _outcome(config, "cook_outcomes", COOK_SUCCESS_PROB):
         print("[cook] success -> ready")
-        return {"status": "ready"}
+        return {"status": "ready", "agent_trace": ["kitchen_agent"]}
     print("[cook] FAILED")
-    return {"status": "cook_failed"}
+    return {"status": "cook_failed", "agent_trace": ["kitchen_agent"]}
 
 
 def serve(state: State, config: RunnableConfig) -> dict:
     """60/40 coin flip. The llm decides (and pays for) any retry."""
     if _outcome(config, "serve_outcomes", SERVE_SUCCESS_PROB):
         print("[serve] success -> complete")
-        return {"status": "complete"}
+        return {"status": "complete", "agent_trace": ["service_agent"]}
     print("[serve] FAILED")
-    return {"status": "serve_failed"}
+    return {"status": "serve_failed", "agent_trace": ["service_agent"]}
+
+
+def menu_rag_agent(state: State) -> dict:
+    """Retrieve grounded menu matches and generate a concise, evidence-based answer."""
+    last_user = latest_human_message(state)
+    if last_user is None:
+        answer = "Tell me what you would like to recommend or order."
+        recommendations: list[MenuRecommendation] = []
+    else:
+        inr_budget = uses_inr_currency(last_user.content)
+        if inr_budget:
+            recommendations = []
+            answer = "Menu prices are listed in USD. Please ask again with a USD budget so I can filter the menu accurately."
+        else:
+            recommendations = recommend_menu_items(last_user.content, inventory_snapshot())
+        if not inr_budget and not recommendations:
+            answer = "I couldn't find an in-stock match for that request. Tell me a dish name and I can check its availability."
+        elif recommendations:
+            context = "\n".join(
+                f"- {item['name']} (${item['price']:.2f}; stock: {item['stock']}): "
+                f"{item['description']} Tags: {', '.join(item['tags'])}."
+                for item in recommendations
+            )
+            response = get_llm().invoke(
+                [
+                    SystemMessage(
+                        content=(
+                            "You are the restaurant's menu recommendation agent. Recommend only dishes in the "
+                            "provided context and only when stock is above zero. Use the actual listed price and "
+                            "do not invent ingredients, dietary properties, stock, or alternatives. If no item "
+                            "fits, say so. Keep the response concise and friendly.\n\n"
+                            f"Retrieved menu context:\n{context}"
+                        )
+                    ),
+                    last_user,
+                ]
+            )
+            answer = response.content.strip()
+
+    return {
+        "messages": [AIMessage(content=answer)],
+        "recommendations": recommendations,
+        "status": "awaiting_user",
+        "agent_trace": ["menu_rag_agent"],
+    }
 
 
 # ============================================================
@@ -478,11 +659,24 @@ def route_after_llm(state: State) -> str:
     status = state["status"]
     if status == "awaiting_user":
         return END
+    if status == "menu_recommendation":
+        return "menu_rag_agent"
     if status == "placed":
-        return "order_confirm"
-    if status in ("cook", "serve"):
-        return status
+        return "inventory_agent"
+    if status == "cook":
+        return "kitchen_agent"
+    if status == "serve":
+        return "service_agent"
     return END  # done / failed
+
+
+def supervisor(state: State) -> dict:
+    """Coordinate specialist agents while keeping conversation decisions centralized."""
+    update = {**llm_node(state), "agent_trace": ["supervisor"]}
+    if update.get("status") == "failed" and state["reserved_quantity"] > 0:
+        release_inventory(state["order"]["dish_name"], state["reserved_quantity"])
+        update["reserved_quantity"] = 0
+    return update
 
 
 # ============================================================
@@ -491,21 +685,29 @@ def route_after_llm(state: State) -> str:
 
 builder = StateGraph(State)
 builder.add_node("user_input", user_input)
-builder.add_node("llm", llm_node)
-builder.add_node("order_confirm", order_confirm)
-builder.add_node("cook", cook)
-builder.add_node("serve", serve)
+builder.add_node("supervisor", supervisor)
+builder.add_node("inventory_agent", order_confirm)
+builder.add_node("kitchen_agent", cook)
+builder.add_node("service_agent", serve)
+builder.add_node("menu_rag_agent", menu_rag_agent)
 
 builder.add_edge(START, "user_input")
-builder.add_edge("user_input", "llm")
-builder.add_edge("order_confirm", "llm")
-builder.add_edge("cook", "llm")
-builder.add_edge("serve", "llm")
+builder.add_edge("user_input", "supervisor")
+builder.add_edge("inventory_agent", "supervisor")
+builder.add_edge("kitchen_agent", "supervisor")
+builder.add_edge("service_agent", "supervisor")
 builder.add_conditional_edges(
-    "llm",
+    "supervisor",
     route_after_llm,
-    {"order_confirm": "order_confirm", "cook": "cook", "serve": "serve", END: END},
+    {
+        "menu_rag_agent": "menu_rag_agent",
+        "inventory_agent": "inventory_agent",
+        "kitchen_agent": "kitchen_agent",
+        "service_agent": "service_agent",
+        END: END,
+    },
 )
+builder.add_edge("menu_rag_agent", END)
 
 graph = builder.compile()
 

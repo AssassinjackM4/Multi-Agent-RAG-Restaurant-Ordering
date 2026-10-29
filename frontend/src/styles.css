@@ -76,6 +76,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .hero-slide-dots .dot.active { width: 18px; border-radius: 999px; background: #fff; }
 .promise-row { max-width: 900px; display: flex; align-items: center; justify-content: space-between; margin: 18px auto 24px; padding: 0 20px; }
 .promise-row > div { display: flex; align-items: center; gap: 11px; }
+.promise-row > div:last-child { gap: 6px; transform: translateX(-14px); }
 .promise-icon { width: 36px; height: 36px; display: grid; place-items: center; color: var(--green); border: 1px solid #e5e8df; border-radius: 12px; background: #fff; }
 .promise-row strong, .promise-row small { display: block; }
 .promise-row strong { font-size: 11px; }
@@ -86,10 +87,11 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .section-heading h2, .order-heading h2 { margin: 11px 0 7px; font-size: 39px; line-height: 1.2; letter-spacing: -2px; }
 .section-heading p { margin: 0; color: #868980; font-size: 12px; }
 .search-box { width: 320px; height: 43px; min-width: 240px; display: flex; align-items: center; gap: 9px; padding: 0 11px; color: #8b9086; background: #fff; border: 1px solid var(--line); border-radius: 9px; }
-.search-box input { flex: 1; min-width: 0; border: none; outline: none; color: var(--ink); font-size: 11px; background: transparent; }
+.menu-search-box { width: min(620px, calc(100% - 280px)); height: 48px; min-width: 0; margin: 10px 280px 0 0; padding: 0 14px; border-radius: 12px; box-shadow: 0 6px 20px rgba(43,55,42,.045); }
+.search-box input { flex: 1; min-width: 0; border: none; outline: none; color: var(--ink); font-size: 13px; background: transparent; }
 .search-box input::placeholder { color: #a1a49d; }
 .search-box kbd { padding: 4px 5px; color: #999d95; background: #f6f6f2; border-radius: 4px; font: 9px "DM Sans", sans-serif; }
-.category-row { display: flex; gap: 8px; padding: 22px 0 25px; overflow-x: auto; scrollbar-width: none; }
+.category-row { display: flex; gap: 8px; padding: 14px 0 25px; overflow-x: auto; scrollbar-width: none; }
 .category-row::-webkit-scrollbar { display: none; }
 .category-pill { flex: 0 0 auto; padding: 8px 14px; color: #71776e; background: transparent; border: 1px solid #e7e7df; border-radius: 99px; font-size: 10px; font-weight: 600; transition: .15s ease; }
 .category-pill:hover { border-color: #c6d0c3; color: var(--green); }
@@ -100,6 +102,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .food-photo-wrap { height: 175px; position: relative; overflow: hidden; background: #e9e6dc; }
 .food-photo { width: 100%; height: 100%; object-fit: cover; transition: transform .35s ease; }
 .food-card:hover .food-photo { transform: scale(1.04); }
+.photo-credit { position: absolute; right: 7px; bottom: 7px; display: flex; gap: 5px; padding: 4px 6px; border-radius: 5px; background: rgba(255,255,255,.9); font-size: 7px; line-height: 1.2; }
+.photo-credit a { color: #53624e; text-decoration: underline; text-underline-offset: 2px; }
 .food-tag { position: absolute; top: 11px; left: 11px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; color: #465a43; background: rgba(255,255,250,.93); border-radius: 99px; font-size: 9px; font-weight: 700; backdrop-filter: blur(9px); }
 .food-tag > span { width: 6px; height: 6px; }
 .food-tag.sold-tag { color: #a25746; }
@@ -206,6 +210,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .chat-finished { display: flex; align-items: center; gap: 7px; margin: 0 14px 14px 45px; padding: 9px 11px; color: #4f6d4d; background: #f0f5ed; border-radius: 7px; font-size: 9px; }
 .failed-finished { color: #985846; background: #fff1ec; }
 .ai-chat-launcher { position: fixed; right: 22px; top: 58%; bottom: auto; z-index: 40; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 10px; transform: translateY(-50%); }
+.ai-chat-launcher.chat-open { top: auto; bottom: 1%; transform: none; }
 .ai-bot-button { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; color: #fff; background: linear-gradient(135deg, var(--green), #4c6c52); border: none; border-radius: 999px; box-shadow: 0 18px 36px rgba(34, 48, 35, .22); font-size: 11px; font-weight: 700; }
 .human-robot-avatar { position: relative; width: 50px; height: 64px; display: inline-block; flex: 0 0 auto; filter: drop-shadow(0 2px 2px rgba(29,46,31,.12)); animation: robot-float 2.6s ease-in-out infinite; }
 .robot-antenna { position: absolute; top: 0; left: 50%; width: 2px; height: 8px; background: #86a17f; transform: translateX(-50%); }
@@ -241,7 +246,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .launcher-robot { width: 42px; height: 54px; }
 .launcher-robot .robot-head { transform: translateX(-50%) scale(.84); }
 .launcher-robot .robot-antenna, .launcher-robot .robot-body, .launcher-robot .robot-arm, .launcher-robot .robot-leg { scale: .84; }
-.ai-chat-window { width: min(350px, calc(100vw - 26px)); max-height: calc(100vh - 36px); display: flex; flex-direction: column; background: rgba(255,255,255,.96); border: 1px solid #ece8e1; border-radius: 18px; box-shadow: 0 25px 52px rgba(31, 42, 28, .16); backdrop-filter: blur(18px); overflow: hidden; }
+.ai-chat-window { width: min(380px, calc(100vw - 26px)); height: min(48vh, 680px); max-height: calc(100vh - 120px); display: flex; flex-direction: column; background: rgba(255,255,255,.96); border: 1px solid #ece8e1; border-radius: 18px; box-shadow: 0 25px 52px rgba(31, 42, 28, .16); backdrop-filter: blur(18px); overflow: hidden; }
 .ai-chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #f4f7f1; border-bottom: 1px solid #ecece5; }
 .ai-header-identity { display: inline-flex; align-items: center; gap: 8px; }
 .ai-chat-header strong, .ai-chat-header small { display: block; }
@@ -250,7 +255,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .header-robot { width: 34px; height: 42px; scale: .68; transform-origin: center; margin: -6px; }
 .header-robot .robot-head { transform: translateX(-50%) scale(.85); }
 .close-chat { width: 26px; height: 26px; display: grid; place-items: center; background: transparent; border: 1px solid #e2e2db; border-radius: 8px; color: #5c675c; }
-.ai-chat-body { min-height: 60px; max-height: min(42vh, 360px); flex: 1 1 auto; overflow: auto; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth; }
+.ai-chat-body { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth; }
 .ai-chat-message { display: flex; flex-direction: column; gap: 4px; }
 .ai-chat-message span { font-size: 8px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: #7f867c; }
 .ai-chat-message p { margin: 0; padding: 9px 10px; border-radius: 10px 10px 10px 4px; background: #f2f4f0; color: #000; font-size: 9px; line-height: 1.6; }
@@ -321,8 +326,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .menu-section, .order-section { padding: 0 18px; }
   .section-heading { align-items: flex-start; flex-direction: column; }
   .section-heading h2 { font-size: 34px; }
-  .search-box { width: 100%; }
-  .category-row { margin-right: -18px; padding-top: 17px; }
+  .menu-search-box { width: 100%; height: 46px; margin: 10px 0 0; }
+  .menu-search-box kbd { display: none; }
+  .category-row { margin-right: -18px; padding-top: 12px; }
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
   .food-photo-wrap { height: clamp(115px, 31vw, 175px); }
   .food-info { padding: 10px; }
@@ -362,3 +368,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .note-bottom { left: -25px; }
   .product-grid { gap: 9px; }
 }
+.agent-trace { padding: 8px 15px; border-bottom: 1px solid #efeee9; }
+.agent-trace > span { display: block; margin-bottom: 6px; color: #7f867c; font-size: 8px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
+.agent-trace > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.agent-trace-step { padding: 4px 7px; border: 1px solid #e5e9e1; border-radius: 99px; color: #38533e; background: #f5f7f2; font-size: 8px; font-weight: 700; }
+.ai-chat-body .agent-trace { padding: 3px 0 5px; border: 0; }
