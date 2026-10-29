@@ -25,13 +25,11 @@
 
 <div align="center">
 
-[![🚀 Live Demo](https://img.shields.io/badge/🚀_Try_The_AI_Chef-Click_Here-2ea44f?style=for-the-badge&logo=vercel&logoColor=white)](https://multi-agent-rag-restaurant-ordering1.vercel.app/)
-
+[![🚀 Live Demo](https://img.shields.io/badge/🚀_Try_The_AI_Chef-Click_Here-2ea44f?style=for-the-badge&logo=vercel&logoColor=white)](https://multi-agent-rag-restaurant-ordering.vercel.app/)
 </div>
 
 ---
 ## 🧠 Why This Is a TRUE Multi-Agent RAG System
-
 Most ordering apps use hardcoded forms. This system uses **specialized agents + RAG-powered menu intelligence** to handle the entire order lifecycle through conversation:
 
 | 🧠 Agent Capability | 🍕 How This System Uses It |
@@ -219,7 +217,7 @@ Contributions are welcome! 🎉
 
 - 💼 [LinkedIn](https://www.linkedin.com/in/aniket-meshram-0515a3223)
 - 💻 [GitHub](https://github.com/AssassinjackM4)
-- 🌐 [Live Demo](https://multi-agent-rag-restaurant-ordering1.vercel.app/)
+- 🌐 [Live Demo](https://multi-agent-rag-restaurant-ordering.vercel.app/)
 
 ---
 <div align="center">
