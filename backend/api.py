@@ -8,11 +8,21 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 
 from main import State, get_llm, initial_state, inventory_snapshot, run_turn
 
 app = FastAPI(title="Restaurant Order Agent API", version="1.0.0")
+FRONTEND_URL = (
+    os.getenv(
+        "FRONTEND_URL",
+        "https://multi-agent-rag-restaurant-ordering.vercel.app",
+    )
+    .strip()
+    .rstrip("/")
+    or "https://multi-agent-rag-restaurant-ordering.vercel.app"
+)
 allowed_origins = [
     origin.strip().rstrip("/")
     for origin in os.getenv("FRONTEND_ORIGINS", "").split(",")
@@ -22,6 +32,7 @@ allowed_origins = list(dict.fromkeys([
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://ai-restaurant-order-agent.vercel.app",
+    FRONTEND_URL,
     *allowed_origins,
 ]))
 app.add_middleware(
@@ -31,6 +42,11 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.api_route("/", methods=["GET", "HEAD"])
+def frontend() -> RedirectResponse:
+    return RedirectResponse(url=f"{FRONTEND_URL}/", status_code=307)
 
 
 class CartItem(BaseModel):

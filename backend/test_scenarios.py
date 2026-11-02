@@ -361,7 +361,14 @@ def test_api_menu_and_multi_item_checkout():
     )
 
 
-def test_api_allows_deployed_vercel_frontend_origin():
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "https://ai-restaurant-order-agent.vercel.app",
+        "https://multi-agent-rag-restaurant-ordering.vercel.app",
+    ),
+)
+def test_api_allows_deployed_vercel_frontend_origin(origin):
     from fastapi.testclient import TestClient
 
     import api
@@ -370,13 +377,31 @@ def test_api_allows_deployed_vercel_frontend_origin():
     response = client.options(
         "/api/menu",
         headers={
-            "Origin": "https://ai-restaurant-order-agent.vercel.app",
+            "Origin": origin,
             "Access-Control-Request-Method": "GET",
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "https://ai-restaurant-order-agent.vercel.app"
+    assert response.headers["access-control-allow-origin"] == origin
+    menu_response = client.get("/api/menu", headers={"Origin": origin})
+    assert menu_response.status_code == 200
+    assert menu_response.headers["access-control-allow-origin"] == origin
+
+
+def test_root_redirects_to_deployed_frontend():
+    from fastapi.testclient import TestClient
+
+    import api
+
+    client = TestClient(api.app)
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == f"{api.FRONTEND_URL}/"
+    head_response = client.head("/", follow_redirects=False)
+    assert head_response.status_code == 307
+    assert head_response.headers["location"] == f"{api.FRONTEND_URL}/"
 
 
 def test_api_chat_can_check_stock_then_place_order():
